@@ -26,6 +26,13 @@ type Config struct {
 	Sources []string `yaml:"sources"`
 }
 
+// DefaultConfig is the explicit form of the implicit source SourceDirs uses. Writing
+// it on `tmux_s config` keeps first-run behavior unchanged while putting the editable
+// schema and its working default in front of the user.
+func DefaultConfig() Config {
+	return Config{Sources: []string{"~/.tmux_s/sessions"}}
+}
+
 // Entry is one session found on disk. File is kept so --list can say where a name came
 // from, which is the only way to tell two same-named sessions apart.
 type Entry struct {
@@ -37,17 +44,48 @@ type Entry struct {
 // Dir returns ~/.tmux_s.
 func Dir() (string, error) { return configdir.Dir(App) }
 
+// Path is ~/.tmux_s/config.yaml.
+func Path() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.yaml"), nil
+}
+
+// Ensure returns Path, materializing DefaultConfig when it is missing. An existing
+// file is never rewritten, so opening the shared config command cannot disturb edits.
+func Ensure() (string, error) {
+	path, err := Path()
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	if err := configdir.SaveAtomic(dir, "config.yaml", DefaultConfig()); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // Load reads config.yaml. path overrides the default location; an empty path uses
 // ~/.tmux_s/config.yaml. A missing file is not an error — it yields the default source
 // list, which is the wanted first-run behavior.
 func Load(path string) (Config, error) {
 	var c Config
 	if path == "" {
-		dir, err := Dir()
+		var err error
+		path, err = Path()
 		if err != nil {
 			return c, err
 		}
-		path = filepath.Join(dir, "config.yaml")
 	}
 	if err := configdir.Load(path, &c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)

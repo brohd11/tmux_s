@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -139,5 +140,41 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 	if len(got.Sources) != 0 {
 		t.Errorf("sources = %v, want none", got.Sources)
+	}
+}
+
+func TestEnsureMaterializesExplicitDefaultAndPreservesEdits(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	path, err := Ensure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(home, ".tmux_s", "config.yaml")
+	if path != wantPath {
+		t.Fatalf("path = %q, want %q", path, wantPath)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := DefaultConfig(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("materialized config = %#v, want %#v", got, want)
+	}
+
+	const edited = "sources:\n  - ~/dotfiles/sessions\n"
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != edited {
+		t.Fatalf("Ensure rewrote existing config to %q", data)
 	}
 }

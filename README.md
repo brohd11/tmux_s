@@ -92,6 +92,9 @@ machines that define different sessions. On a name collision the earlier source 
 a machine-local directory listed first overrides the shared one; `tmux_s --list` marks
 the shadowed entry.
 
+Run `tmux_s config` to materialize the default file and edit it with `$EDITOR` (falling
+back to `$VISUAL`). `tmux_s config --dir` opens `~/.tmux_s` in the system file manager.
+
 ## Install
 
 Unix:

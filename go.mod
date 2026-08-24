@@ -3,7 +3,7 @@ module github.com/brohd11/tmux_s
 go 1.26.4
 
 require (
-	github.com/brohd11/goutil v0.1.3
+	github.com/brohd11/goutil v0.1.4
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )
