@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/brohd11/goutil/shellquote"
 )
 
 // Exists reports whether a session of this name is already running.
@@ -78,7 +80,7 @@ func Print(w io.Writer, cmds []Command) error {
 			ids = append(ids, fmt.Sprintf("%%pane%d", next))
 			next++
 		}
-		if _, err := fmt.Fprintln(w, "tmux "+shellJoin(resolve(c, ids))); err != nil {
+		if _, err := fmt.Fprintln(w, "tmux "+shellquote.JoinMinimal(resolve(c, ids))); err != nil {
 			return err
 		}
 	}
@@ -107,35 +109,7 @@ func resolve(c Command, ids []string) []string {
 func cmdError(argv []string, err error) error {
 	var exit *exec.ExitError
 	if asExitError(err, &exit) && len(exit.Stderr) > 0 {
-		return fmt.Errorf("tmux %s: %s", shellJoin(argv), strings.TrimSpace(string(exit.Stderr)))
+		return fmt.Errorf("tmux %s: %s", shellquote.JoinMinimal(argv), strings.TrimSpace(string(exit.Stderr)))
 	}
-	return fmt.Errorf("tmux %s: %w", shellJoin(argv), err)
-}
-
-// shellJoin renders an argv the way a shell would have to be given it. Display only —
-// see the Command doc comment; a real run passes these as separate arguments and never
-// builds a command line at all.
-func shellJoin(argv []string) string {
-	parts := make([]string, len(argv))
-	for i, a := range argv {
-		parts[i] = shellQuote(a)
-	}
-	return strings.Join(parts, " ")
-}
-
-func shellQuote(s string) string {
-	if s != "" && strings.IndexFunc(s, needsQuote) < 0 {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-func needsQuote(r rune) bool {
-	switch {
-	case r >= '0' && r <= '9', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
-		return false
-	case r == '-', r == '_', r == '.', r == '/', r == ':', r == '=', r == '%', r == '+', r == ',', r == '@':
-		return false
-	}
-	return true
+	return fmt.Errorf("tmux %s: %w", shellquote.JoinMinimal(argv), err)
 }

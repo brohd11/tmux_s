@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 BIN=tmux_s
+# ---- end config ----
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 

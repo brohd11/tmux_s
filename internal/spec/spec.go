@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/brohd11/tmux_s/internal/pathx"
 	"gopkg.in/yaml.v3"
 )
 
@@ -116,7 +117,7 @@ func parseSession(name string, node *yaml.Node) (Session, error) {
 		case "session":
 			s.Name = val.Value
 		case "dir":
-			s.Dir = expandPath(val.Value)
+			s.Dir = pathx.Expand(val.Value)
 		case "windows":
 			windows = val
 		default:
@@ -200,7 +201,7 @@ func parseWindow(name string, node *yaml.Node, inherit string) (Window, error) {
 		}
 		switch key.Value {
 		case "dir":
-			w.Dir = expandPath(val.Value)
+			w.Dir = pathx.Expand(val.Value)
 		case "layout":
 			w.Layout = val.Value
 		case "focus":
@@ -268,7 +269,7 @@ func parsePane(node *yaml.Node, inherit string, skip map[string]bool) (Pane, err
 		}
 		switch key.Value {
 		case "dir":
-			p.Dir = expandPath(val.Value)
+			p.Dir = pathx.Expand(val.Value)
 		case "keys":
 			keys, err := parseKeys(val)
 			if err != nil {
@@ -337,22 +338,6 @@ func isSingleSession(node *yaml.Node) bool {
 		}
 	}
 	return false
-}
-
-// expandPath resolves ~ and $VAR in a directory so a session file can be shared across
-// machines whose home directories differ. tmux's -c takes a literal path and does no
-// expansion of its own, and nothing here goes through a shell that would.
-func expandPath(p string) string {
-	if p == "" {
-		return ""
-	}
-	p = os.ExpandEnv(p)
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			p = filepath.Join(home, strings.TrimPrefix(p[1:], "/"))
-		}
-	}
-	return p
 }
 
 func kindName(k yaml.Kind) string {

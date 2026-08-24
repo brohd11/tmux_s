@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/brohd11/goutil/configdir"
+	"github.com/brohd11/tmux_s/internal/pathx"
 	"github.com/brohd11/tmux_s/internal/spec"
 )
 
@@ -105,7 +106,7 @@ func (c Config) SourceDirs() ([]string, error) {
 	}
 	out := make([]string, 0, len(c.Sources))
 	for _, s := range c.Sources {
-		out = append(out, expandPath(s))
+		out = append(out, pathx.Expand(s))
 	}
 	return out, nil
 }
@@ -187,16 +188,4 @@ func sessionFiles(dir string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
-}
-
-// expandPath resolves ~ and $VAR in a source directory, the same handling session files
-// get for `dir`. A sources list that is shared across machines needs it.
-func expandPath(p string) string {
-	p = os.ExpandEnv(p)
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, strings.TrimPrefix(p[1:], "/"))
-		}
-	}
-	return p
 }
