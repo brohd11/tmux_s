@@ -1,6 +1,7 @@
 package pathx
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -10,6 +11,7 @@ import (
 func TestExpand(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	t.Setenv("TMUX_S_TEST_DIR", "/somewhere")
 
 	tests := []struct {
@@ -39,6 +41,7 @@ func TestExpand(t *testing.T) {
 // instead of leaving tmux to use its own default.
 func TestExpandEmptyIsNotHome(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	if got := Expand(""); got != "" {
 		t.Errorf(`Expand("") = %q, want ""`, got)
 	}
@@ -49,6 +52,7 @@ func TestExpandEmptyIsNotHome(t *testing.T) {
 // failing over a directory the user may not have meant to use yet.
 func TestExpandOtherUserTildeIsReturnedAsWritten(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	const in = "~someoneelse/projects"
 	if got := Expand(in); got != in {
 		t.Errorf("Expand(%q) = %q, want it returned unchanged", in, got)
