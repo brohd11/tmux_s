@@ -189,3 +189,75 @@ func sessionFiles(dir string) ([]string, error) {
 	sort.Strings(out)
 	return out, nil
 }
+
+// Destination is where a save goes and under what name.
+type Destination struct {
+	Path string
+	// Session is the name the written file declares. It is the captured session's own
+	// name except where a bare-name override renamed it.
+	Session string
+}
+
+// Dest is where `tmux_s save <session> [override]` writes.
+//
+// With no override the file is <first source>/<session>.yaml. The first source, because
+// Scan is first-wins: writing into a later one would produce a file that --list marks as
+// shadowed by whatever is already there.
+//
+// An override is read as whichever of three things it looks like:
+//
+//   - a directory that exists -> <dir>/<session>.yaml, since naming a directory has no
+//     other useful reading;
+//   - a bare word, no separator in it -> a session name, not a file in the current
+//     directory. `tmux_s save go-dev backup` writes <first source>/backup.yaml declaring
+//     `session: backup`, so `tmux_s backup` builds a second session from the same shape.
+//     Renaming is the point: a copy left named go-dev would only shadow the original, and
+//     --list would show two go-devs where one is unreachable;
+//   - anything else -> that path, still declaring the captured session's own name. A path
+//     says where to put the file, not what to call the session.
+//
+// A .yaml extension is added where it is missing. Scan only picks up .yaml and .yml, so a
+// file saved without one would sit in the sessions directory being ignored.
+func (c Config) Dest(session, override string) (Destination, error) {
+	if override == "" {
+		p, err := c.inSource(session)
+		return Destination{Path: p, Session: session}, err
+	}
+	p := pathx.Expand(override)
+	if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+		return Destination{Path: filepath.Join(p, withYAML(session)), Session: session}, nil
+	}
+	if !strings.ContainsAny(p, `/\`) {
+		file := withYAML(p)
+		// The same rule spec uses to name a file that declares no session: the basename
+		// without its extension. Going through withYAML first means `backup`, `backup.yaml`
+		// and `backup.yml` all name the session backup.
+		name := strings.TrimSuffix(file, filepath.Ext(file))
+		if name == "" {
+			return Destination{}, fmt.Errorf("%q is not a usable session name", override)
+		}
+		path, err := c.inSource(file)
+		return Destination{Path: path, Session: name}, err
+	}
+	return Destination{Path: withYAML(p), Session: session}, nil
+}
+
+// inSource places name in the first configured source directory.
+func (c Config) inSource(name string) (string, error) {
+	dirs, err := c.SourceDirs()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dirs[0], withYAML(name)), nil
+}
+
+// withYAML gives a path the extension Scan looks for, leaving one it already has — .yml
+// included, since that is equally well scanned and rewriting it to .yaml would quietly
+// disagree with whatever else in the user's setup named the file.
+func withYAML(p string) string {
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".yaml", ".yml":
+		return p
+	}
+	return p + ".yaml"
+}

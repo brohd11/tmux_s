@@ -178,3 +178,78 @@ func TestEnsureMaterializesExplicitDefaultAndPreservesEdits(t *testing.T) {
 		t.Fatalf("Ensure rewrote existing config to %q", data)
 	}
 }
+
+// Dest is where `save` writes, and most of it is deciding what an override argument is:
+// a directory, a bare name, or a path — and whether it renames the session.
+func TestDest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+
+	sources := filepath.Join(home, "sources")
+	existingDir := filepath.Join(home, "dotfiles", "sessions")
+	if err := os.MkdirAll(existingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Sources: []string{sources}}
+
+	tests := []struct {
+		name        string
+		override    string
+		wantPath    string
+		wantSession string
+	}{
+		{"no override goes to the first source", "", filepath.Join(sources, "go-dev.yaml"), "go-dev"},
+		// A bare word renames: a second file still called go-dev would only shadow the
+		// first, and neither could be built under the name written on it.
+		{"a bare word names a session there", "backup", filepath.Join(sources, "backup.yaml"), "backup"},
+		{"a name that already has the extension keeps it", "backup.yaml", filepath.Join(sources, "backup.yaml"), "backup"},
+		{"a .yml name is left alone", "backup.yml", filepath.Join(sources, "backup.yml"), "backup"},
+		{"a dotted name keeps its dots", "backup.2", filepath.Join(sources, "backup.2.yaml"), "backup.2"},
+		// A path says where the file goes, not what the session is called.
+		{"a directory that exists takes the session's name", existingDir, filepath.Join(existingDir, "go-dev.yaml"), "go-dev"},
+		{"a path is used as given", filepath.Join(home, "x", "my.yaml"), filepath.Join(home, "x", "my.yaml"), "go-dev"},
+		{"a path missing the extension gets one", filepath.Join(home, "x", "my"), filepath.Join(home, "x", "my.yaml"), "go-dev"},
+		{"a tilde path is expanded", "~/x/my.yaml", filepath.Join(home, "x", "my.yaml"), "go-dev"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := cfg.Dest("go-dev", tt.override)
+			if err != nil {
+				t.Fatalf("Dest: %v", err)
+			}
+			if got.Path != tt.wantPath {
+				t.Errorf("Dest(%q).Path = %q, want %q", tt.override, got.Path, tt.wantPath)
+			}
+			if got.Session != tt.wantSession {
+				t.Errorf("Dest(%q).Session = %q, want %q", tt.override, got.Session, tt.wantSession)
+			}
+		})
+	}
+}
+
+func TestDestBadName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+
+	if _, err := (Config{Sources: []string{home}}).Dest("go-dev", ".yaml"); err == nil {
+		t.Error("expected an error for an override that leaves no name")
+	}
+}
+
+// With no sources configured, save lands in the same directory the default scan reads.
+func TestDestDefaultSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+
+	got, err := Config{}.Dest("go-dev", "")
+	if err != nil {
+		t.Fatalf("Dest: %v", err)
+	}
+	want := filepath.Join(home, "."+App, "sessions", "go-dev.yaml")
+	if got.Path != want {
+		t.Errorf("Dest = %q, want %q", got.Path, want)
+	}
+}

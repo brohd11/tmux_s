@@ -7,6 +7,7 @@ tmux_s                      list the sessions that are defined
 tmux_s my_session           build (or attach to) the session named roblox
 tmux_s my_session --print   show the tmux commands without running any
 tmux_s my_session --detach  build the session but stay where you are
+tmux_s save my_session      write a running session out as a session file
 tmux_s update               update to the latest release
 ```
 
@@ -75,6 +76,46 @@ window mapping with no integer keys describes that window's single pane, so `key
 
 `~` and `$VAR` are expanded in every `dir`, tmux's `-c` takes a literal path and
 nothing here passes through a shell that would expand them.
+
+## Saving a running session
+
+`tmux_s save <session> [name|path]` goes the other way: it reads a session you built by hand
+and writes the file that rebuilds it.
+
+```
+tmux_s save go-dev                     ~/.tmux_s/sessions/go-dev.yaml
+tmux_s save go-dev backup              ~/.tmux_s/sessions/backup.yaml, as `backup`
+tmux_s save go-dev ~/my-session.yaml   somewhere else
+tmux_s save go-dev ~/dotfiles/sessions a directory, so go-dev.yaml inside it
+tmux_s save go-dev --overwrite         replace the file that is already there
+```
+
+A bare second argument is a **session name**, not a file in the current directory. It
+lands in the sessions directory beside the rest *and renames the copy*, so
+`tmux_s save go-dev backup` gives you a `backup` you can actually build — a second file
+still called `go-dev` would only shadow the original, and `--list` would show two of them
+where one is unreachable. A **path** says where the file goes and leaves the name alone.
+
+A missing `.yaml` is added either way: only `.yaml` and `.yml` are scanned, so a file
+saved without one would sit there being ignored.
+
+It captures the windows and their order, the names, the panes in each, the layout that
+places them, every pane's working directory, and which window and pane are active. The
+layout is tmux's own layout string, so the split offsets come back exactly as they were.
+Directories are written at the highest level that covers them and contracted to `~`, so
+the file stays readable and portable.
+
+It does **not** capture commands. tmux only knows what a pane is running *now* — a shell
+when the pane is idle — never the line that was typed, so a guessed `keys:` would be
+wrong either way. A saved session starts its panes empty; add the `keys:` worth keeping
+by hand.
+
+Without a path the file goes to the first configured source directory — the first,
+because a name found in an earlier source shadows a later one, so anywhere else would
+write a file `--list` marks as shadowed.
+
+**An existing file is not overwritten without `--overwrite`.** The file being replaced is
+the one with your hand-added `keys:` in it, and a capture cannot put those back.
 
 ## Config
 

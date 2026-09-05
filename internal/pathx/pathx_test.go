@@ -58,3 +58,46 @@ func TestExpandOtherUserTildeIsReturnedAsWritten(t *testing.T) {
 		t.Errorf("Expand(%q) = %q, want it returned unchanged", in, got)
 	}
 }
+
+// Contract is what keeps a saved session file portable: the home half of Expand, undone.
+func TestContract(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty stays empty", "", ""},
+		{"home itself", home, "~"},
+		{"path under home", filepath.Join(home, "projects", "go"), filepath.Join("~", "projects", "go")},
+		{"outside home is untouched", "/etc/hosts", "/etc/hosts"},
+		{"relative is untouched", "sub/dir", "sub/dir"},
+		// A home of /tmp/x must not turn /tmp/xyz into ~yz — the separator is part of
+		// the match, not just the prefix.
+		{"a sibling sharing the prefix is untouched", home + "sibling", home + "sibling"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Contract(tt.in); got != tt.want {
+				t.Errorf("Contract(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// Contract and Expand are inverses over the tilde, which is what makes a file written on
+// one machine resolve on another.
+func TestContractExpandRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+
+	for _, p := range []string{home, filepath.Join(home, "a", "b"), "/etc", ""} {
+		if got := Expand(Contract(p)); got != p {
+			t.Errorf("Expand(Contract(%q)) = %q, want %q", p, got, p)
+		}
+	}
+}

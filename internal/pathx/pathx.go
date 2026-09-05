@@ -7,6 +7,8 @@ package pathx
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/brohd11/goutil/strutil"
 )
@@ -33,4 +35,33 @@ func Expand(p string) string {
 		return p
 	}
 	return expanded
+}
+
+// Contract is Expand's inverse for the home directory half: a path under the user's home
+// comes back as ~/…, so a file written by `tmux_s save` on one machine still resolves on
+// another whose home directory sits elsewhere.
+//
+// Only the home prefix is undone. $VAR cannot be reversed — a value like /usr/local
+// matches any number of variables and picking one would be a guess — so an environment
+// variable the user wrote by hand is not restored, it is left as the path it expanded to.
+//
+// A path outside home, or one taken while the home directory cannot be determined, is
+// returned unchanged: an absolute path is always correct, just less portable.
+func Contract(p string) string {
+	if p == "" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	// The separator has to be part of the match, or /home/bobby would contract against
+	// a home of /home/bob and yield ~by.
+	if rest, ok := strings.CutPrefix(p, home+string(filepath.Separator)); ok {
+		return "~" + string(filepath.Separator) + rest
+	}
+	return p
 }
