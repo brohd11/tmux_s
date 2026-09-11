@@ -61,7 +61,11 @@ func Contract(p string) string {
 	// The separator has to be part of the match, or /home/bobby would contract against
 	// a home of /home/bob and yield ~by.
 	if rest, ok := strings.CutPrefix(p, home+string(filepath.Separator)); ok {
-		return "~" + string(filepath.Separator) + rest
+		// Written with forward slashes rather than the host separator. The tilde form
+		// exists to be portable, and strutil.ExpandHome reads either spelling on either
+		// OS, so a file saved on Windows still has to resolve on the machine it is
+		// shared with.
+		return "~/" + filepath.ToSlash(rest)
 	}
 	return p
 }

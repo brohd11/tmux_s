@@ -72,7 +72,9 @@ func TestContract(t *testing.T) {
 	}{
 		{"empty stays empty", "", ""},
 		{"home itself", home, "~"},
-		{"path under home", filepath.Join(home, "projects", "go"), filepath.Join("~", "projects", "go")},
+		// Always forward slashes, on every OS: the contracted form is what gets written
+		// into a session file meant to be shared between machines.
+		{"path under home", filepath.Join(home, "projects", "go"), "~/projects/go"},
 		{"outside home is untouched", "/etc/hosts", "/etc/hosts"},
 		{"relative is untouched", "sub/dir", "sub/dir"},
 		// A home of /tmp/x must not turn /tmp/xyz into ~yz — the separator is part of
