@@ -14,22 +14,18 @@ import (
 	"github.com/brohd11/tmux_s/internal/spec"
 )
 
-// App is the name behind ~/.tmux_s — the hidden config directory convention every app
-// in the monorepo shares (goutil/configdir).
+// App is the name behind ~/.tmux_s.
 const App = "tmux_s"
 
-// Config is ~/.tmux_s/config.yaml.
-//
-// Sources is a list rather than a single directory so a dotfiles checkout can carry one
-// set of sessions and the machine another: a laptop and a remote box share the repo but
-// want different sessions, and listing both means neither has to be edited per machine.
+const configName = "config.yaml"
+
+// Config is ~/.tmux_s/config.yaml. Sources is a list so shared dotfiles and machine-local
+// sessions can both be scanned.
 type Config struct {
 	Sources []string `yaml:"sources"`
 }
 
-// DefaultConfig is the explicit form of the implicit source SourceDirs uses. Writing
-// it on `tmux_s config` keeps first-run behavior unchanged while putting the editable
-// schema and its working default in front of the user.
+// DefaultConfig is the explicit form of the implicit default source.
 func DefaultConfig() Config {
 	return Config{Sources: []string{"~/.tmux_s/sessions"}}
 }
@@ -51,34 +47,23 @@ func Path() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "config.yaml"), nil
+	return filepath.Join(dir, configName), nil
 }
 
 // Ensure returns Path, materializing DefaultConfig when it is missing. An existing
 // file is never rewritten, so opening the shared config command cannot disturb edits.
 func Ensure() (string, error) {
-	path, err := Path()
-	if err != nil {
-		return "", err
-	}
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
-	} else if !os.IsNotExist(err) {
-		return "", err
-	}
 	dir, err := Dir()
 	if err != nil {
 		return "", err
 	}
-	if err := configdir.SaveAtomic(dir, "config.yaml", DefaultConfig()); err != nil {
+	if _, err := configdir.Ensure(dir, configName, DefaultConfig()); err != nil {
 		return "", err
 	}
-	return path, nil
+	return filepath.Join(dir, configName), nil
 }
 
-// Load reads config.yaml. path overrides the default location; an empty path uses
-// ~/.tmux_s/config.yaml. A missing file is not an error — it yields the default source
-// list, which is the wanted first-run behavior.
+// Load reads config.yaml (path overrides the default). A missing file yields the default.
 func Load(path string) (Config, error) {
 	var c Config
 	if path == "" {
@@ -111,16 +96,8 @@ func (c Config) SourceDirs() ([]string, error) {
 	return out, nil
 }
 
-// Scan reads every session defined under the configured sources, in source order.
-//
-// A source directory that does not exist is skipped silently: the whole point of the
-// multi-source list is that the same config is shared by machines where only some of
-// the paths are present. A directory that exists but cannot be read is reported —
-// that is a real problem, not an absent machine.
-//
-// Names are first-wins, so an earlier source shadows a later one and a machine-local
-// directory listed first can override the dotfiles copy. Shadowed entries are still
-// returned, flagged, so --list can show them.
+// Scan reads every session under the sources, in order. Missing directories are skipped;
+// unreadable ones are errors. Names are first-wins; shadowed entries are returned flagged.
 func Scan(dirs []string) ([]Entry, error) {
 	var out []Entry
 	seen := map[string]bool{}
@@ -165,9 +142,7 @@ func Find(entries []Entry, name string) (Entry, error) {
 	return Entry{}, fmt.Errorf("no session named %q; defined: %s", name, strings.Join(names, ", "))
 }
 
-// sessionFiles lists the .yaml/.yml files directly in dir, sorted. The scan is not
-// recursive: a session directory is a flat drawer of files, and descending into it
-// would make a nested checkout's own YAML look like session config.
+// sessionFiles lists the .yaml/.yml files directly in dir, sorted (not recursive).
 func sessionFiles(dir string) ([]string, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -198,26 +173,13 @@ type Destination struct {
 	Session string
 }
 
-// Dest is where `tmux_s save <session> [override]` writes.
+// Dest is where `tmux_s save <session> [override]` writes. With no override:
+// <first source>/<session>.yaml (the first source wins Scan). An override is:
+//   - an existing directory -> <dir>/<session>.yaml;
+//   - a bare word -> a new session name in the first source (a renamed copy);
+//   - anything else -> that path, keeping the captured session's name.
 //
-// With no override the file is <first source>/<session>.yaml. The first source, because
-// Scan is first-wins: writing into a later one would produce a file that --list marks as
-// shadowed by whatever is already there.
-//
-// An override is read as whichever of three things it looks like:
-//
-//   - a directory that exists -> <dir>/<session>.yaml, since naming a directory has no
-//     other useful reading;
-//   - a bare word, no separator in it -> a session name, not a file in the current
-//     directory. `tmux_s save go-dev backup` writes <first source>/backup.yaml declaring
-//     `session: backup`, so `tmux_s backup` builds a second session from the same shape.
-//     Renaming is the point: a copy left named go-dev would only shadow the original, and
-//     --list would show two go-devs where one is unreachable;
-//   - anything else -> that path, still declaring the captured session's own name. A path
-//     says where to put the file, not what to call the session.
-//
-// A .yaml extension is added where it is missing. Scan only picks up .yaml and .yml, so a
-// file saved without one would sit in the sessions directory being ignored.
+// A missing .yaml extension is added.
 func (c Config) Dest(session, override string) (Destination, error) {
 	if override == "" {
 		p, err := c.inSource(session)
@@ -229,9 +191,7 @@ func (c Config) Dest(session, override string) (Destination, error) {
 	}
 	if !strings.ContainsAny(p, `/\`) {
 		file := withYAML(p)
-		// The same rule spec uses to name a file that declares no session: the basename
-		// without its extension. Going through withYAML first means `backup`, `backup.yaml`
-		// and `backup.yml` all name the session backup.
+		// Same rule as spec: the basename without extension.
 		name := strings.TrimSuffix(file, filepath.Ext(file))
 		if name == "" {
 			return Destination{}, fmt.Errorf("%q is not a usable session name", override)
@@ -251,9 +211,7 @@ func (c Config) inSource(name string) (string, error) {
 	return filepath.Join(dirs[0], withYAML(name)), nil
 }
 
-// withYAML gives a path the extension Scan looks for, leaving one it already has — .yml
-// included, since that is equally well scanned and rewriting it to .yaml would quietly
-// disagree with whatever else in the user's setup named the file.
+// withYAML adds .yaml unless the path already ends in .yaml or .yml.
 func withYAML(p string) string {
 	switch strings.ToLower(filepath.Ext(p)) {
 	case ".yaml", ".yml":

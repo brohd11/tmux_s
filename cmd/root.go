@@ -13,10 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version is the binary version; defaults to "dev" for a plain `go build`. The makefile
-// stamps it via -X ldflags (git describe --tags --always --dirty), so release and `make`
-// binaries report their real version and the self-update check can compare it against
-// the latest tag.
+// version is stamped by the makefile via -X ldflags; "dev" for a plain go build.
 var version = "dev"
 
 var (
@@ -115,13 +112,8 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	return tmux.Attach(name)
 }
 
-// printList writes the defined sessions, with the file each came from. Shadowed names —
-// a second definition in a later source — are marked rather than hidden, since a
-// session silently not being the one you wrote is exactly the confusing case.
-//
-// The sources are echoed when there is nothing to list: with directories that are
-// skipped when absent by design, "no sessions" otherwise gives no hint about where
-// tmux_s looked.
+// printList writes the defined sessions and their files, marking shadowed names. The sources
+// are listed when nothing is found.
 func printList(out io.Writer, entries []config.Entry, dirs []string) error {
 	if len(entries) == 0 {
 		fmt.Fprintln(out, "no sessions defined. searched:")

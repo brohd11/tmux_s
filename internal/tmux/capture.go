@@ -1,8 +1,6 @@
 package tmux
 
-// Capture is the reverse of Plan: it reads a running session out of tmux and returns the
-// spec.Session that would rebuild it. What comes back is geometry and directories only —
-// see Capture's doc for why the commands cannot come with it.
+// Capture reads a running session back into a spec.Session (layout and directories only).
 
 import (
 	"fmt"
@@ -14,19 +12,12 @@ import (
 	"github.com/brohd11/tmux_s/internal/spec"
 )
 
-// fieldSep separates the fields of one list-panes row.
-//
-// It is the ASCII unit separator rather than a tab because window names are whatever the
-// user set them to and may hold tabs or spaces, and pane_current_path is a path. \x1f is
-// the one byte neither can plausibly contain, and the path is last so even a stray
-// separator inside one cannot shift the fields before it.
+// fieldSep is the ASCII unit separator, which neither window names nor paths contain. The
+// path is the last field.
 const fieldSep = "\x1f"
 
-// paneFields are the values Capture asks tmux for, in the order the rows carry them.
-// Session and window values repeat on each of that window's rows, which is what lets one
-// list-panes call describe the whole session — display-message would be the direct way to
-// ask for the session's own path, but its -t is a pane target and does not take the =name
-// form that pins an exact session, so it is read off the rows instead.
+// paneFields are the list-panes fields Capture reads. Session values are read off the rows
+// because display-message's -t doesn't take the =name form.
 var paneFields = []string{
 	"session_path",
 	"window_index",
@@ -38,14 +29,9 @@ var paneFields = []string{
 	"pane_current_path",
 }
 
-// Capture reads the running session named name.
-//
-// Windows, their names and order, the panes in each and the layout that places them, the
-// working directory of every pane, and which window and pane are active. Not the
-// commands: tmux only knows pane_current_command, the process running now, which is
-// `zsh` for an idle pane and the program's own name for a busy one — never the line that
-// was typed. A `keys:` guessed from it would be wrong in both cases, so a captured
-// session carries no keys and the ones worth keeping are added by hand afterwards.
+// Capture reads the running session name: windows, panes, layouts, directories and active
+// window/pane. Not commands: tmux only knows the current process, so keys are left for the
+// user to add.
 func Capture(name string) (spec.Session, error) {
 	if !Exists(name) {
 		return spec.Session{}, fmt.Errorf("no session named %q is running", name)
@@ -53,7 +39,7 @@ func Capture(name string) (spec.Session, error) {
 
 	// -s widens list-panes from the current window to every pane in the session, which it
 	// reports window by window in index order.
-	argv := []string{"list-panes", "-s", "-t", "=" + name, "-F", format()}
+	argv := []string{"list-panes", "-s", "-t", exact(name), "-F", format()}
 	out, err := exec.Command("tmux", argv...).Output()
 	if err != nil {
 		return spec.Session{}, cmdError(argv, err)
@@ -110,10 +96,7 @@ func parsePanes(name, out string) (spec.Session, error) {
 			if windowName == "" {
 				return s, fmt.Errorf("window %s has no name", windowIndex)
 			}
-			// Windows are addressed by name when the session is rebuilt, so two of them
-			// sharing one would send every later command to whichever tmux matched first
-			// — the layout landing on the wrong window, silently. Better to stop and say
-			// which name to change.
+			// Windows are addressed by name on rebuild, so duplicates are an error.
 			if seenName[windowName] {
 				return s, fmt.Errorf("two windows are named %q; rename one, windows are matched by name when the session is rebuilt", windowName)
 			}
@@ -146,9 +129,7 @@ func parsePanes(name, out string) (spec.Session, error) {
 		// tmux lists panes in index order already; sorting makes that a property of this
 		// function rather than of the command it happens to be fed.
 		sort.SliceStable(p, func(a, b int) bool { return p[a].index < p[b].index })
-		// The indices themselves are dropped: they start at pane-base-index, and writing
-		// a file that only rebuilds correctly under the same setting would bake this
-		// machine's tmux.conf into it. Order is what carries over.
+		// Drop the indices (they depend on pane-base-index); order carries over.
 		for _, e := range p {
 			s.Windows[i].Panes = append(s.Windows[i].Panes, e.pane)
 		}

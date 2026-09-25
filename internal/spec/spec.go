@@ -1,16 +1,5 @@
-// Package spec parses the YAML session files into the plain Session/Window/Pane
-// structs the planner consumes.
-//
-// Everything here goes through yaml.Node rather than a struct or map decode, for two
-// reasons that are both fatal to the simpler approach:
-//
-//   - Go maps are unordered, and window/pane order is the entire point of the file.
-//     Only a Node walk preserves the order the user wrote.
-//   - A pane key is written as a bare integer (`0:`), which YAML tags !!int. Decoding
-//     that into map[string]any fails outright, and the int-vs-string test on the key is
-//     precisely what tells a window's panes apart from its own fields.
-//
-// The Node handling is confined to this package; everything downstream sees structs.
+// Package spec parses session YAML into Session/Window/Pane structs. It walks yaml.Node
+// because maps lose window/pane order and pane keys are !!int.
 package spec
 
 import (
@@ -51,12 +40,8 @@ type Pane struct {
 	Focus bool
 }
 
-// ParseFile reads one session file and returns every session it defines.
-//
-// A top-level mapping carrying any of a session's own keys (`windows`, `session`,
-// `dir`) is a single session, named by its `session:` key or, failing that, the file's
-// basename. Any other mapping is read as a map of session name to spec, which is how
-// several sessions share one file.
+// ParseFile returns every session in a file. A top-level mapping with session keys
+// (windows, session, dir) is one session; otherwise it maps names to sessions.
 func ParseFile(path string) ([]Session, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -146,12 +131,8 @@ func parseSession(name string, node *yaml.Node) (Session, error) {
 	return s, nil
 }
 
-// parseWindow reads one window. inherit is the directory a pane falls back to when
-// neither it nor the window names one.
-//
-// The value is either a bare string — shorthand for a single pane running that line —
-// or a mapping. In a mapping, integer keys are panes and string keys are the window's
-// own fields; a mapping mixing the two has no sensible reading and is rejected.
+// parseWindow reads one window: a string (single-pane command) or a mapping where int keys
+// are panes and string keys are window fields. inherit is the fallback directory.
 func parseWindow(name string, node *yaml.Node, inherit string) (Window, error) {
 	w := Window{Name: name}
 
@@ -257,9 +238,7 @@ func scalarPane(node *yaml.Node, inherit string) (Pane, error) {
 	return Pane{Dir: inherit, Keys: []string{node.Value}, Enter: true}, nil
 }
 
-// parsePane reads a pane mapping. skip names the keys that belong to the enclosing
-// window rather than the pane — non-nil only for the single-pane form, where window and
-// pane share one mapping.
+// parsePane reads a pane mapping. skip holds window keys to ignore in the single-pane form.
 func parsePane(node *yaml.Node, inherit string, skip map[string]bool) (Pane, error) {
 	p := Pane{Dir: inherit, Enter: true}
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -323,13 +302,8 @@ func parseBool(node *yaml.Node) (bool, error) {
 	return b, nil
 }
 
-// isSingleSession decides which of the two file shapes this is. Any of the session's
-// own keys at the top level marks the single-session form; without them every top-level
-// key is a session name.
-//
-// `session` and `dir` count, not just `windows`: a file with `session:` and a typo for
-// `windows:` would otherwise be read as a session literally named "session", and the
-// error would point at the wrong thing entirely.
+// isSingleSession reports whether any session key appears at the top level. session and dir
+// count too, so a typo in windows: isn't read as a session named "session".
 func isSingleSession(node *yaml.Node) bool {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		switch node.Content[i].Value {

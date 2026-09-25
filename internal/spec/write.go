@@ -1,13 +1,7 @@
 package spec
 
-// The writer half of the package: a Session back to the YAML a reader would parse into
-// the same Session. It is here rather than beside its caller so the two halves of the
-// format sit together — every rule ParseFile enforces has its mirror a few hundred lines
-// up, and a change to one that misses the other shows as a failing round-trip test.
-//
-// Like the reader, it works in yaml.Node rather than marshalling a Go map, for the same
-// two reasons: a map would scramble window and pane order, and a pane's key has to carry
-// the !!int tag that tells panes apart from the window's own fields.
+// The writer: Session back to YAML that parses to the same Session (see the round-trip
+// tests). Uses yaml.Node for order and !!int pane keys.
 
 import (
 	"fmt"
@@ -16,12 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Marshal renders one session as a session file, in the single-session form.
-//
-// Directories are written at the highest level that covers them — a directory every pane
-// in a window shares is written once on the window — because the reader resolves
-// inheritance while parsing, leaving every Pane.Dir populated. Dumping those verbatim
-// would put a `dir` on every pane of every window and bury the parts worth reading.
+// Marshal renders one session in the single-session form, writing each directory at the
+// highest level that covers it.
 func Marshal(s Session) ([]byte, error) {
 	node, err := Node(s)
 	if err != nil {
@@ -41,9 +31,7 @@ func Node(s Session) (*yaml.Node, error) {
 	}
 
 	root := mapping()
-	// `session` is always written, never left to the filename. A file saved under a name
-	// of its own — `tmux_s save go-dev ~/my-session.yaml` — would otherwise come back as a
-	// session called my-session, silently renamed by where it was put.
+	// Always written, so the filename doesn't rename the session.
 	put(root, "session", str(s.Name))
 	if s.Dir != "" {
 		put(root, "dir", str(pathx.Contract(s.Dir)))
@@ -77,9 +65,7 @@ func windowNode(w Window, inherit string) (*yaml.Node, error) {
 		return nil, fmt.Errorf("window %q: no panes", w.Name)
 	}
 
-	// A directory shared by every pane belongs on the window; anything else stays on the
-	// panes that differ. Written on the window it also becomes their inherit, so the
-	// panes below fall silent.
+	// A directory shared by every pane goes on the window.
 	dir := w.Dir
 	if dir == "" {
 		if common, ok := commonDir(w.Panes); ok {
@@ -104,10 +90,7 @@ func windowNode(w Window, inherit string) (*yaml.Node, error) {
 		put(node, "focus", boolean(true))
 	}
 
-	// The single-pane form folds the pane into the window's own mapping, which only
-	// works while the two agree on a directory — there is one `dir` key between them, and
-	// the reader hands it to both. A pane that overrides its window's directory has to be
-	// written out as a numbered pane instead, even though it is alone.
+	// The single-pane form works only when pane and window share a directory.
 	if len(w.Panes) == 1 && w.Panes[0].Dir == paneInherit {
 		paneFields(node, w.Panes[0], paneInherit, false)
 		return node, nil
@@ -121,10 +104,7 @@ func windowNode(w Window, inherit string) (*yaml.Node, error) {
 	return node, nil
 }
 
-// paneFields adds a pane's keys to node. withDir is false for the single-pane form, where
-// the directory was already written as the window's and repeating it would be read back
-// as the window's anyway. focus is only meaningful where there is more than one pane to
-// choose between, which is the same condition.
+// paneFields adds a pane's keys. withDir and focus are skipped for the single-pane form.
 func paneFields(node *yaml.Node, p Pane, inherit string, withDir bool) {
 	if withDir && p.Dir != "" && p.Dir != inherit {
 		put(node, "dir", str(pathx.Contract(p.Dir)))
@@ -162,14 +142,8 @@ func commonDir(panes []Pane) (string, bool) {
 	return first, true
 }
 
-// mapping is a block mapping that renders as `{}` while it is empty.
-//
-// The empty case is the reason the style is set at all. A window with nothing to say —
-// no directory of its own, no layout, no focus, no keys — must still be a mapping: left
-// as a bare `name:` it is a null scalar, and the reader turns a scalar window into a pane
-// running that string, so every rebuild would send an empty line to the pane. `{}` reads
-// back as the single default pane it is. yaml.v3 drops the flow style once the mapping
-// has content, so the non-empty case is unaffected.
+// mapping is a block mapping that renders as `{}` when empty. A bare `name:` would read back
+// as a null scalar, i.e. a pane running an empty command.
 func mapping() *yaml.Node {
 	return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: yaml.FlowStyle}
 }
@@ -187,9 +161,7 @@ func putInt(m *yaml.Node, key int, val *yaml.Node) {
 	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: fmt.Sprint(key)}, val)
 }
 
-// str is a string scalar. The explicit !!str tag makes yaml.v3 quote a value that would
-// otherwise read back as something else, so a window named `0`, `true` or `null` survives
-// the round trip as its name.
+// str is a string scalar tagged !!str, so names like `0`, `true` or `null` round-trip.
 func str(v string) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}
 }

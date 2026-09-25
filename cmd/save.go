@@ -43,9 +43,7 @@ either way, and an existing file is not overwritten without --overwrite.`,
 }
 
 func init() {
-	// The root's --config is a local flag, not a persistent one, so it does not reach
-	// here. Declaring it again on the command that needs it keeps it off `config` and
-	// `update`, where a config file to read would mean nothing.
+	// --config is a root-local flag, so save declares its own.
 	f := saveCmd.Flags()
 	f.StringVar(&configPath, "config", "", "config file to read (default ~/.tmux_s/config.yaml)")
 	f.BoolVar(&saveOverwrite, "overwrite", false, "replace the destination file if it already exists")
@@ -67,10 +65,8 @@ func runSave(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Checked before tmux is touched, so a run that is going to refuse says so at once.
-	// Overwriting is not the default because the file being replaced is the one with the
-	// hand-added keys: in it, which a capture cannot put back — but it is a normal thing
-	// to want once the session has been rearranged, hence the flag.
+	// Checked before touching tmux. The target file may hold hand-added keys a capture can't
+	// restore.
 	if !saveOverwrite {
 		if _, err := os.Stat(dest.Path); err == nil {
 			return fmt.Errorf("%s already exists; pass --overwrite to replace it, or a different name or path", dest.Path)

@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,18 +11,16 @@ import (
 	"github.com/brohd11/goutil/shellquote"
 )
 
+// exact is the -t target that matches session name exactly; a bare name is a prefix
+// match, so "roblox" would find "roblox2".
+func exact(name string) string { return "=" + name }
+
 // Exists reports whether a session of this name is already running.
-//
-// The =name form forces an exact match. Without it tmux treats the target as a prefix,
-// so `tmux_s roblox` would find an unrelated `roblox2` and attach to that instead of
-// building the session asked for.
 func Exists(name string) bool {
-	return exec.Command("tmux", "has-session", "-t", "="+name).Run() == nil
+	return exec.Command("tmux", "has-session", "-t", exact(name)).Run() == nil
 }
 
-// Build runs a plan, substituting each captured pane id into the commands that refer to
-// it. It stops at the first failure: a half-built session is not something to keep
-// piling windows onto, and the error names the command that broke.
+// Build runs a plan, substituting captured pane ids, and stops at the first failure.
 func Build(cmds []Command) error {
 	var ids []string
 	for _, c := range cmds {
@@ -41,35 +40,27 @@ func Build(cmds []Command) error {
 	return nil
 }
 
-// Attach hands the terminal to the session.
-//
-// Inside tmux this has to be switch-client: attach-session from within a session
-// refuses ("sessions should be nested with care"). Outside it, execAttach replaces this
-// process with tmux so the client owns the tty directly, which is what the bash
-// scripts' trailing `tmux attach-session` did.
+// Attach hands the terminal to the session: switch-client inside tmux, else execAttach.
 func Attach(name string) error {
-	if os.Getenv("TMUX") != "" {
-		argv := []string{"switch-client", "-t", "=" + name}
-		if err := exec.Command("tmux", argv...).Run(); err != nil {
-			return cmdError(argv, err)
-		}
-		return nil
+	if os.Getenv("TMUX") == "" {
+		return execAttach(name)
 	}
-	return execAttach(name)
+	argv := AttachCommand(name)
+	if err := exec.Command("tmux", argv...).Run(); err != nil {
+		return cmdError(argv, err)
+	}
+	return nil
 }
 
-// AttachCommand is the attach step as it appears in --print, so the printed plan is the
-// whole story rather than everything up to the interesting part.
+// AttachCommand is the attach step Attach performs, as --print shows it.
 func AttachCommand(name string) Command {
 	if os.Getenv("TMUX") != "" {
-		return Command{"switch-client", "-t", "=" + name}
+		return Command{"switch-client", "-t", exact(name)}
 	}
-	return Command{"attach-session", "-t", "=" + name}
+	return Command{"attach-session", "-t", exact(name)}
 }
 
-// Print writes the commands as they would be run, one per line, with arguments quoted
-// only where a shell would need it. It is a rendering for reading — the real run never
-// builds a command line.
+// Print writes the commands one per line, shell-quoted for reading only.
 func Print(w io.Writer, cmds []Command) error {
 	var ids []string
 	next := 0
@@ -87,10 +78,7 @@ func Print(w io.Writer, cmds []Command) error {
 	return nil
 }
 
-// resolve replaces the plan's pane placeholders with the ids captured so far. A
-// reference to a pane that has not been created yet cannot occur in a plan Plan built,
-// so an out-of-range ref is left as-is rather than papered over — it would surface as a
-// tmux "can't find pane" naming the placeholder.
+// resolve substitutes captured pane ids; an out-of-range ref is left as-is.
 func resolve(c Command, ids []string) []string {
 	out := make([]string, len(c))
 	for i, a := range c {
@@ -105,10 +93,11 @@ func resolve(c Command, ids []string) []string {
 	return out
 }
 
-// cmdError names the failing command and prefers tmux's own message to "exit status 1".
+// cmdError names the failing command and prefers tmux's own message (captured in
+// ExitError.Stderr by Output) to "exit status 1".
 func cmdError(argv []string, err error) error {
 	var exit *exec.ExitError
-	if asExitError(err, &exit) && len(exit.Stderr) > 0 {
+	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
 		return fmt.Errorf("tmux %s: %s", shellquote.JoinMinimal(argv), strings.TrimSpace(string(exit.Stderr)))
 	}
 	return fmt.Errorf("tmux %s: %w", shellquote.JoinMinimal(argv), err)
